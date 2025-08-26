@@ -10,4 +10,6 @@ sealed interface ContactEvent {
     object ShowDialog : ContactEvent
     object HideDialog : ContactEvent
     data class DeleteContact(val contact: Contact) : ContactEvent
+    data class ShowEditDialog(val contact: Contact) : ContactEvent
+    object SaveEditedContact : ContactEvent
 }

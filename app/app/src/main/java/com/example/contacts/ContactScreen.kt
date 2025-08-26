@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +46,10 @@ fun ContactScreen(
             AddContactDialog(state = state, onEvent = onEvent)
         }
 
+        if (state.isEditingContact) {
+            EditContactDialog(state = state, onEvent = onEvent)
+        }
+
         LazyColumn (
             contentPadding = padding,
             modifier = Modifier.fillMaxSize(),
@@ -63,6 +68,14 @@ fun ContactScreen(
                        )
                        Text(text = contact.phoneNumber, fontSize = 12.sp)
                    }
+
+                    IconButton(
+                        onClick = {
+                            onEvent(ContactEvent.ShowEditDialog(contact))
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Contact")
+                    }
 
                     IconButton(
                         onClick = {

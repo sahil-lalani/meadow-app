@@ -57,6 +57,7 @@ class ContactViewModel(
     private fun connectWebSocket() {
         val request = Request.Builder()
             .url("ws://10.0.2.2:3000")
+            //.url("wss://meadow-app-production.up.railway.app")
             .build()
         webSocket = webSocketClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
@@ -203,7 +204,9 @@ class ContactViewModel(
             ContactEvent.HideDialog -> {
                 _state.update{
                     it.copy(
-                        isAddingContact = false
+                        isAddingContact = false,
+                        isEditingContact = false,
+                        editingContactId = null
                     )
                 }
             }
@@ -270,6 +273,54 @@ class ContactViewModel(
                     it.copy(
                         isAddingContact = true
                     )
+            }
+
+            is ContactEvent.ShowEditDialog -> {
+                val c = event.contact
+                _state.update {
+                    it.copy(
+                        isAddingContact = false,
+                        isEditingContact = true,
+                        editingContactId = c.id,
+                        firstName = c.firstName,
+                        lastName = c.lastName,
+                        phoneNumber = c.phoneNumber
+                    )
+                }
+            }
+
+            ContactEvent.SaveEditedContact -> {
+                val id = state.value.editingContactId ?: return
+                val firstName = state.value.firstName
+                val lastName = state.value.lastName
+                val phoneNumber = state.value.phoneNumber
+
+                if (firstName.isBlank() || lastName.isBlank() || phoneNumber.isBlank()) {
+                    return
+                }
+
+                viewModelScope.launch {
+                    val existing = dao.getById(id)
+                    val updated = Contact(
+                        id = id,
+                        firstName = firstName,
+                        lastName = lastName,
+                        phoneNumber = phoneNumber,
+                        isSynced = existing?.isSynced ?: false,
+                        isSoftDeleted = existing?.isSoftDeleted ?: false
+                    )
+                    dao.insertContact(updated)
+                }
+
+                _state.update {
+                    it.copy(
+                        isEditingContact = false,
+                        editingContactId = null,
+                        firstName = "",
+                        lastName = "",
+                        phoneNumber = ""
+                    )
+                }
             }
         }
     }

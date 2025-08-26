@@ -13,6 +13,7 @@ import org.json.JSONObject
 object ServerApi {
     // If running on Android emulator, use 10.0.2.2 to reach host machine localhost.
     private const val BASE_URL = "http://10.0.2.2:3000"
+    // private const val BASE_URL = "https://meadow-app-production.up.railway.app"
     private val client = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 

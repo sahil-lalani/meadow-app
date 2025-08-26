@@ -29,4 +29,7 @@ interface ContactDao {
     @Query("UPDATE contact SET isSoftDeleted = 1, isSynced = 0 WHERE id = :id")
     suspend fun softDelete(id: String)
 
+    @Query("SELECT * FROM contact WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): Contact?
+
 }

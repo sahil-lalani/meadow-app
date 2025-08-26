@@ -6,4 +6,6 @@ data class ContactState(
     val lastName: String = "",
     val phoneNumber: String = "",
     val isAddingContact: Boolean = false,
+    val isEditingContact: Boolean = false,
+    val editingContactId: String? = null,
 )
