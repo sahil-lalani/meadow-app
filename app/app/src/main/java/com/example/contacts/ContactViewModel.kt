@@ -44,11 +44,11 @@ class ContactViewModel(
         .pingInterval(15, TimeUnit.SECONDS)
         .build()
     private var webSocket: WebSocket? = null
-    private var reconnectDelayMs = 5000L
+    private var reconnectDelayMs = 500L
     //private val maxReconnectDelayMs = 30000L
     private var isReconnecting = false
-    private var reconnectAttempts = 0
-    private val maxReconnectAttempts = 10
+//    private var reconnectAttempts = 0
+//    private val maxReconnectAttempts = 10
 
     init {
         connectWebSocket()
@@ -63,7 +63,7 @@ class ContactViewModel(
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
                 Log.d("WS", "connected: code=${response.code}")
                 //reconnectDelayMs = 1000L
-                reconnectAttempts = 0
+                //reconnectAttempts = 0
                 // Attempt to sync any pending local changes when we reconnect
                 viewModelScope.launch {
                     trySyncPending()
@@ -75,8 +75,11 @@ class ContactViewModel(
                                 dao.deleteById(c.id)
                                 ServerApi.ackDeleted(c.id)
                             } else {
-                                dao.insertContact(c.copy(isSynced = true, isSoftDeleted = false))
-                                ServerApi.ackCreated(c.id)
+                                dao.insertContact(c.copy(isSynced = true, isSoftDeleted = false, pendingChange = null))
+                                when (c.pendingChange) {
+                                    "updated" -> ServerApi.ackUpdated(c.id)
+                                    else -> ServerApi.ackCreated(c.id)
+                                }
                             }
                         }
                     } catch (_: Exception) {
@@ -110,7 +113,8 @@ class ContactViewModel(
                                 lastName = payload.getString("lastName"),
                                 phoneNumber = payload.getString("phoneNumber"),
                                 isSynced = true,
-                                isSoftDeleted = false
+                                isSoftDeleted = false,
+                                pendingChange = null
                             )
                             viewModelScope.launch {
                                 Log.d("WS", "upserting contact ${contact.id}")
@@ -118,6 +122,27 @@ class ContactViewModel(
                                 // ACK that we processed the create from server
                                 viewModelScope.launch {
                                     ServerApi.ackCreated(contact.id)
+                                }
+                            }
+                        }
+                        "contact.updated" -> {
+                            val payload = obj.getJSONObject("payload")
+                            val contact = Contact(
+                                id = payload.getString("id"),
+                                firstName = payload.getString("firstName"),
+                                lastName = payload.getString("lastName"),
+                                phoneNumber = payload.getString("phoneNumber"),
+                                isSynced = true,
+                                isSoftDeleted = false,
+                                pendingChange = null,
+                                editedAt = runCatching { java.time.Instant.parse(payload.getString("editedAt")).toEpochMilli() }.getOrNull()
+                            )
+                            viewModelScope.launch {
+                                Log.d("WS", "upserting updated contact ${contact.id}")
+                                dao.insertContact(contact)
+                                // ACK that we processed the update from server
+                                viewModelScope.launch {
+                                    ServerApi.ackUpdated(contact.id)
                                 }
                             }
                         }
@@ -152,9 +177,13 @@ class ContactViewModel(
                     dao.deleteById(c.id)
                 }
             } else {
-                val ok = ServerApi.createContact(c)
+                val ok = when (c.pendingChange) {
+                    "updated" -> ServerApi.updateContact(c)
+                    else -> ServerApi.createContact(c)
+                }
                 if (ok) {
                     dao.markSynced(c.id)
+                    dao.markPendingChange(c.id, null)
                 }
             }
         }
@@ -162,18 +191,18 @@ class ContactViewModel(
 
     private fun scheduleReconnect() {
         if (isReconnecting) return
-        if (reconnectAttempts >= maxReconnectAttempts) {
-            Log.d("WS", "max reconnect attempts reached; stopping auto-reconnect")
-            return
-        }
+//        if (reconnectAttempts >= maxReconnectAttempts) {
+//            Log.d("WS", "max reconnect attempts reached; stopping auto-reconnect")
+//            return
+//        }
         isReconnecting = true
         //val delayNow = reconnectDelayMs
-        Log.d("WS", "reconnecting attempt ${reconnectAttempts + 1}/${maxReconnectAttempts} in ${reconnectDelayMs}ms")
+        //Log.d("WS", "reconnecting attempt ${reconnectAttempts + 1}/${maxReconnectAttempts} in ${reconnectDelayMs}ms")
         viewModelScope.launch {
 //            delay(delayNow)
             delay(reconnectDelayMs)
             isReconnecting = false
-            reconnectAttempts += 1
+            //reconnectAttempts += 1
             connectWebSocket()
             // reconnectDelayMs = min(reconnectDelayMs * 2, maxReconnectDelayMs)
         }
@@ -306,10 +335,19 @@ class ContactViewModel(
                         firstName = firstName,
                         lastName = lastName,
                         phoneNumber = phoneNumber,
-                        isSynced = existing?.isSynced ?: false,
-                        isSoftDeleted = existing?.isSoftDeleted ?: false
+                        isSynced = false,
+                        isSoftDeleted = existing?.isSoftDeleted ?: false,
+                        pendingChange = "updated",
+                        editedAt = System.currentTimeMillis()
                     )
                     dao.insertContact(updated)
+                    // Fire-and-forget server sync for updates
+                    viewModelScope.launch {
+                        if (ServerApi.updateContact(updated)) {
+                            dao.markSynced(id)
+                            dao.markPendingChange(id, null)
+                        }
+                    }
                 }
 
                 _state.update {

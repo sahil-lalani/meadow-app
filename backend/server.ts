@@ -17,6 +17,7 @@ const server = http.createServer(app);
 
 type ContactEvent =
     | { type: "contact.created"; payload: { id: string; firstName: string; lastName: string; phoneNumber: string } }
+    | { type: "contact.updated"; payload: { id: string; firstName: string; lastName: string; phoneNumber: string; editedAt: string } }
     | { type: "contact.deleted"; payload: { id: string } };
 
 const wss = new WebSocketServer({ server });
@@ -65,6 +66,16 @@ app.get('/contacts/pending', async (_req, res) => {
                     { isSoftDeleted: true },
                 ],
             },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phoneNumber: true,
+                isSynced: true,
+                isSoftDeleted: true,
+                pendingChange: true,
+                editedAt: true,
+            },
         });
         res.json(pending);
     } catch (e: any) {
@@ -81,7 +92,7 @@ app.post("/contacts", async (req, res) => {
     try {
         const created = await prisma.contact.create({
             // For server->client semantics, mark isSynced=false until client ACKs receipt
-            data: { id, firstName, lastName, phoneNumber, isSynced: false },
+            data: { id, firstName, lastName, phoneNumber, isSynced: false, pendingChange: 'created' },
         });
         res.status(201).json(created);
         console.log('THESE ARE ALL THE CONTACTS RIGHT NOW: \n\n')
@@ -94,6 +105,60 @@ app.post("/contacts", async (req, res) => {
     }
 });
 
+// Update and broadcast
+app.patch("/contacts/:id", async (req, res) => {
+    const id = req.params.id;
+    const { firstName, lastName, phoneNumber, editedAt } = req.body || {};
+    if (!id || typeof id !== "string") {
+        return res.status(400).json({ error: "invalid id" });
+    }
+    const incomingTs = editedAt ? new Date(editedAt).getTime() : 0;
+    try {
+        const existing = await prisma.contact.findUnique({ where: { id } });
+        if (!existing) throw { code: 'P2025' };
+        const currentTs = existing.editedAt ? new Date(existing.editedAt as any).getTime() : 0;
+        const shouldApply = !existing.editedAt || (incomingTs && incomingTs > currentTs);
+        const updated = await prisma.contact.update({
+            where: { id },
+            data: shouldApply ? {
+                ...(firstName ? { firstName } : {}),
+                ...(lastName ? { lastName } : {}),
+                ...(phoneNumber ? { phoneNumber } : {}),
+                isSynced: false,
+                pendingChange: 'updated',
+                editedAt: incomingTs ? new Date(incomingTs) : new Date(),
+            } : {},
+        });
+        res.status(200).json(updated);
+        broadcast({ type: 'contact.updated', payload: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName, phoneNumber: updated.phoneNumber, editedAt: (updated as any).editedAt?.toISOString?.() || new Date().toISOString() } } as ContactEvent);
+    } catch (e: any) {
+        // Only fallback to create when the record doesn't exist (P2025)
+        if (e?.code === 'P2025') {
+            // For upsert via PATCH, require full data to create
+            if (!firstName || !lastName || !phoneNumber) {
+                return res.status(400).json({ error: 'missing fields for upsert create' });
+            }
+            try {
+                const created = await prisma.contact.create({
+                    data: { id, firstName, lastName, phoneNumber, isSynced: false, pendingChange: 'created', editedAt: null },
+                });
+                res.status(201).json(created);
+                broadcast({ type: 'contact.created', payload: { id: created.id, firstName: created.firstName, lastName: created.lastName, phoneNumber: created.phoneNumber } } as ContactEvent);
+            } catch (ce: any) {
+                // If another request created it concurrently, return the existing row (idempotent)
+                if (ce?.code === 'P2002') {
+                    const existing = await prisma.contact.findUnique({ where: { id } });
+                    if (existing) return res.status(200).json(existing);
+                    return res.status(409).json({ error: 'duplicate id' });
+                }
+                return res.status(500).json({ error: 'failed to create on update fallback' });
+            }
+        } else {
+            return res.status(500).json({ error: 'failed to update' });
+        }
+    }
+}); 
+
 // Soft delete and broadcast
 app.delete("/contacts/:id", async (req, res) => {
     const id = req.params.id;
@@ -102,7 +167,7 @@ app.delete("/contacts/:id", async (req, res) => {
     }
     try {
         // Mark as soft-deleted first so we can wait for client ACK before final removal
-        await prisma.contact.update({ where: { id }, data: { isSoftDeleted: true } });
+        await prisma.contact.update({ where: { id }, data: { isSoftDeleted: true, pendingChange: 'deleted', isSynced: false } });
         console.log('THESE ARE ALL THE CONTACTS AFTER SOFT DELETED: \n\n')
         console.log(await prisma.contact.findMany());
         broadcast({ type: "contact.deleted", payload: { id } });
@@ -123,13 +188,23 @@ app.post('/contacts/:id/ack', async (req, res) => {
     }
     if (type === 'created') {
         try {
-            await prisma.contact.update({ where: { id }, data: { isSynced: true } });
+            await prisma.contact.update({ where: { id }, data: { isSynced: true, pendingChange: null } });
             console.log('THESE ARE ALL THE CONTACTS AFTER CREATED ACK: \n\n')
             console.log(await prisma.contact.findMany());
             return res.status(204).send();
         } catch (e: any) {
             if (e?.code === 'P2025') return res.status(404).json({ error: 'not found' });
             return res.status(500).json({ error: 'failed to ack created' });
+        }
+    } else if (type === 'updated') {
+        try {
+            await prisma.contact.update({ where: { id }, data: { isSynced: true, pendingChange: null } });
+            console.log('THESE ARE ALL THE CONTACTS AFTER UPDATED ACK: \n\n')
+            console.log(await prisma.contact.findMany());
+            return res.status(204).send();
+        } catch (e: any) {
+            if (e?.code === 'P2025') return res.status(404).json({ error: 'not found' });
+            return res.status(500).json({ error: 'failed to ack updated' });
         }
     } else if (type === 'deleted') {
         try {

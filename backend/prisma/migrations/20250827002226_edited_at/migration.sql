@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "public"."Contact" ADD COLUMN     "editedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

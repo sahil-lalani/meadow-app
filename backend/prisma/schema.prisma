@@ -21,4 +21,6 @@ model Contact {
   phoneNumber String
   isSynced Boolean @default(false)
   isSoftDeleted Boolean @default(false)
+  pendingChange String?
+  editedAt DateTime?
 }

@@ -98,6 +98,49 @@ object ServerApi {
         }
     }
 
+    suspend fun ackUpdated(contactId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply { put("type", "updated") }
+                .toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url("$BASE_URL/contacts/$contactId/ack")
+                .post(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val ok = response.isSuccessful
+                if (!ok) Log.w("ServerApi", "ackUpdated failed: ${response.code}")
+                return@use ok
+            }
+        } catch (e: Exception) {
+            Log.w("ServerApi", "ackUpdated exception", e)
+            false
+        }
+    }
+
+    suspend fun updateContact(contact: Contact): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val jsonObj = JSONObject().apply {
+                put("firstName", contact.firstName)
+                put("lastName", contact.lastName)
+                put("phoneNumber", contact.phoneNumber)
+                contact.editedAt?.let { put("editedAt", java.time.Instant.ofEpochMilli(it).toString()) }
+            }
+            val body = jsonObj.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url("$BASE_URL/contacts/${contact.id}")
+                .patch(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val ok = response.isSuccessful
+                if (!ok) Log.w("ServerApi", "updateContact failed: ${response.code}")
+                return@use ok
+            }
+        } catch (e: Exception) {
+            Log.w("ServerApi", "updateContact exception", e)
+            false
+        }
+    }
+
     suspend fun getPending(): List<Contact> = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
@@ -121,7 +164,9 @@ object ServerApi {
                             lastName = obj.getString("lastName"),
                             phoneNumber = obj.getString("phoneNumber"),
                             isSynced = obj.optBoolean("isSynced", false),
-                            isSoftDeleted = obj.optBoolean("isSoftDeleted", false)
+                            isSoftDeleted = obj.optBoolean("isSoftDeleted", false),
+                            pendingChange = obj.optString("pendingChange", null),
+                            editedAt = obj.optString("editedAt", null)?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
                         )
                     )
                 }

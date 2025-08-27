@@ -11,5 +11,7 @@ data class Contact (
     val lastName : String,
     val phoneNumber : String,
     val isSynced: Boolean = false,
-    val isSoftDeleted: Boolean = false
+    val isSoftDeleted: Boolean = false,
+    val pendingChange: String? = null,
+    val editedAt: Long? = null
 )

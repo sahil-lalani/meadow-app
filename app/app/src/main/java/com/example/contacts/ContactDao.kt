@@ -32,4 +32,7 @@ interface ContactDao {
     @Query("SELECT * FROM contact WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): Contact?
 
+    @Query("UPDATE contact SET pendingChange = :change WHERE id = :id")
+    suspend fun markPendingChange(id: String, change: String?)
+
 }
