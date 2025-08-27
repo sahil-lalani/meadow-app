@@ -56,8 +56,8 @@ class ContactViewModel(
 
     private fun connectWebSocket() {
         val request = Request.Builder()
-            //.url("ws://10.0.2.2:3000")
-            .url("wss://meadow-app-production.up.railway.app")
+            .url("ws://10.0.2.2:3000")
+            //.url("wss://meadow-app-production.up.railway.app")
             .build()
         webSocket = webSocketClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {

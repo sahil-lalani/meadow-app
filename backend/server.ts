@@ -2,9 +2,19 @@ import express from "express";
 import { PrismaClient } from "./generated/prisma";
 import http from "http";
 import { WebSocketServer } from "ws";
+import cors from "cors";
 
 const app = express();
 const prisma = new PrismaClient();
+
+// Permissive CORS (allow all origins). This is safe for this demo API.
+app.use(cors({
+    origin: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+}));
+app.options("*", cors());
 
 app.use(express.json());
 
