@@ -10,7 +10,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import okhttp3.OkHttpClient
+import okhttp3.Dns
+import okhttp3.EventListener
 import okhttp3.Request
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -42,6 +45,41 @@ class ContactViewModel(
     private val webSocketClient = OkHttpClient.Builder()
         .retryOnConnectionFailure(true)
         .pingInterval(15, TimeUnit.SECONDS)
+        .eventListener(object : EventListener() {
+            fun connectionStart(call: okhttp3.Call) {
+                Log.d("WS", "connectionStart: ${call.request().url}")
+            }
+            override fun dnsStart(call: okhttp3.Call, domainName: String) {
+                Log.d("WS", "dnsStart: $domainName")
+            }
+            override fun dnsEnd(call: okhttp3.Call, domainName: String, inetAddressList: List<java.net.InetAddress>) {
+                Log.d("WS", "dnsEnd: $domainName -> ${inetAddressList.joinToString { it.hostAddress ?: it.hostName }}")
+            }
+            override fun secureConnectStart(call: okhttp3.Call) {
+                Log.d("WS", "secureConnectStart")
+            }
+            override fun secureConnectEnd(call: okhttp3.Call, handshake: okhttp3.Handshake?) {
+                Log.d("WS", "secureConnectEnd: ${handshake?.cipherSuite} ${handshake?.tlsVersion}")
+            }
+            fun connectFailed(call: okhttp3.Call, inetSocketAddress: java.net.InetSocketAddress, protocol: java.net.Proxy, ioe: java.io.IOException) {
+                Log.e("WS", "connectFailed: ${inetSocketAddress.address} via $protocol: ${ioe.message}", ioe)
+            }
+            override fun connectionAcquired(call: okhttp3.Call, connection: okhttp3.Connection) {
+                Log.d("WS", "connectionAcquired: ${connection.route()?.socketAddress}")
+            }
+        })
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<java.net.InetAddress> {
+                return try {
+                    val addrs = Dns.SYSTEM.lookup(hostname)
+                    Log.d("WS", "Dns.lookup($hostname) -> ${addrs.joinToString { it.hostAddress ?: it.hostName }}")
+                    addrs
+                } catch (e: Exception) {
+                    Log.e("WS", "Dns.lookup failed for $hostname: ${e.message}", e)
+                    emptyList()
+                }
+            }
+        })
         .build()
     private var webSocket: WebSocket? = null
     private var reconnectDelayMs = 500L
@@ -55,9 +93,20 @@ class ContactViewModel(
     }
 
     private fun connectWebSocket() {
+        // Preflight DNS check to surface emulator/device DNS issues early (background thread)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val host = "meadow-app-up.railway.app"
+                val addrs = java.net.InetAddress.getAllByName(host)
+                Log.d("WS", "Preflight DNS $host -> ${addrs.joinToString { it.hostAddress }}")
+            } catch (e: Exception) {
+                Log.e("WS", "Preflight DNS failed: ${e.message}", e)
+            }
+        }
         val request = Request.Builder()
-            .url("ws://10.0.2.2:3000")
-            //.url("wss://meadow-app-production.up.railway.app")
+            //.url("ws://10.0.2.2:3000")
+            .url("wss://meadow-app.up.railway.app")
+            //.url("wss://echo.websocket.events")
             .build()
         webSocket = webSocketClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
