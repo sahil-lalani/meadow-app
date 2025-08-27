@@ -8,6 +8,10 @@ const prisma = new PrismaClient();
 
 app.use(express.json());
 
+app.get('/', (_req, res) => {
+    res.send('Hello World');
+});
+
 app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
 });
